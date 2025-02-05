@@ -19,9 +19,13 @@ php artisan make:migration create_role_user_table
 php artisan make:migration create_permission_user_table
 php artisan make:migration create_permission_role_table
 ```
-
+### Paso 2: creacion de archivos 
+php artisan make:provider AuthServiceProvider
+php artisan make:middleware RoleMiddleware
 ### Paso 2: Modelos Requeridos
-
+User
+Role
+Permission
 #### Modelo Role
 ```php
 <?php
@@ -55,6 +59,7 @@ use Illuminate\Database\Eloquent\Model;
 class Permission extends Model 
 {
     protected $fillable = ['name', 'slug'];
+    
 
     public function roles()
     {
@@ -70,8 +75,186 @@ class Permission extends Model
 
 ### Modificaciones en User Model
 Se deben agregar métodos de gestión de roles y permisos en el modelo User.
+```php
+    public const PERMISSIONS_VERSION_KEY = 'permissions_version'; // Versión de permisos
+    public const GLOBAL_ROLES_KEY = 'global_roles_permissions'; // Clave global de roles
+    private const CACHE_TTL = 1440; // Tiempo de vida en minutos (24 horas)
+    private const CACHE_PREFIX = 'user_roles_permissions_'; // Prefijo para claves de caché por usuario
 
+       /**
+     * Evento de inicialización del modelo.
+     * Se ejecuta cuando se guarda o elimina un usuario para actualizar la versión de permisos.
+     */
+    protected static function boot()
+    {
+        parent::boot();
+        
+        // Evento cuando se guarda un usuario (crear o actualizar)
+        static::saved(function ($user) {
+            self::incrementPermissionsVersion();
+            self::logUserChange($user, 'saved');
+        });
+
+        // Evento cuando se elimina un usuario
+        static::deleted(function ($user) {
+            self::incrementPermissionsVersion();
+            self::logUserChange($user, 'deleted');
+        });
+    }
+
+    /**
+     * Relación muchos a muchos con roles.
+     */
+    public function roles()
+    {
+        return $this->belongsToMany(Role::class);
+    }
+
+    /**
+     * Relación muchos a muchos con permisos.
+     */
+    public function permissions()
+    {
+        return $this->belongsToMany(Permission::class);
+    }
+
+        /**
+     * Asigna un rol al usuario.
+     */
+    public function assignRole($roleId)
+    {
+        DB::transaction(function () use ($roleId) {
+            $this->roles()->attach($roleId);
+            self::incrementPermissionsVersion();
+        });
+    }
+
+    /**
+     * Elimina un rol del usuario.
+     */
+    public function removeRole($roleId)
+    {
+        DB::transaction(function () use ($roleId) {
+            $this->roles()->detach($roleId);
+            self::incrementPermissionsVersion();
+        });
+    }
+
+    /**
+     * Reemplaza todos los roles del usuario con uno nuevo.
+     */
+    public function changeRole($newRoleId)
+    {
+        DB::transaction(function () use ($newRoleId) {
+            $this->roles()->sync([$newRoleId]);
+            self::incrementPermissionsVersion();
+        });
+    }
+
+    /**
+     * Obtiene los roles globales con permisos, almacenándolos en caché.
+     */
+    private static function getGlobalRoles()
+    {
+        return Cache::remember(self::GLOBAL_ROLES_KEY, self::CACHE_TTL, function () {
+            return Role::with('permissions:id,name')
+                ->get(['id', 'name'])
+                ->mapWithKeys(function ($role) {
+                    return [
+                        $role->name => [
+                            'id' => $role->id,
+                            'permissions' => $role->permissions->pluck('name')->toArray()
+                        ]
+                    ];
+                })->toArray();
+        });
+    }
+
+        /**
+     * Verifica si el usuario tiene al menos uno de los roles especificados.
+     */
+    public function hasAnyRole($roles)
+    {
+        if (is_string($roles)) {
+            $roles = explode(',', $roles);
+        }
+        
+        $roles = array_map(function($role) {
+            return trim($role, "'\" ");
+        }, $roles);
+
+        $userData = $this->getUserPermissionsAndRole();
+        return in_array(strtolower($userData['role']), array_map('strtolower', $roles));
+    }
+
+    /**
+     * Verifica si el usuario tiene un permiso específico.
+     */
+    public function hasPermission($permissionName)
+    {
+        $userData = $this->getUserPermissionsAndRole();
+        return in_array($permissionName, $userData['permissions']);
+    }
+
+    /**
+     * Verifica si el usuario tiene al menos uno de los permisos especificados.
+     */
+    public function hasAnyPermission($permissions)
+    {
+        $userData = $this->getUserPermissionsAndRole();
+        
+        $permissionsArray = is_string($permissions) ? explode(',', $permissions) : $permissions;
+        
+        return !empty(array_intersect($userData['permissions'], $permissionsArray));
+    }
+
+    / ==============================
+    // GESTIÓN DE CACHÉ MEJORADA
+    // ==============================
+
+    /**
+     * Incrementa la versión de los permisos y limpia la caché global.
+     */
+    private static function incrementPermissionsVersion()
+    {
+        Cache::increment(self::PERMISSIONS_VERSION_KEY);
+        Cache::forget(self::GLOBAL_ROLES_KEY);
+    }
+
+    /**
+     * Obtiene el rol y permisos del usuario, almacenando los datos en caché.
+     */
+    public function getUserPermissionsAndRole()
+    {
+        $version = Cache::get(self::PERMISSIONS_VERSION_KEY, 1);
+        $cacheKey = self::CACHE_PREFIX . "{$this->id}_{$version}";
+        $globalRoles = self::getGlobalRoles();
+
+        return Cache::remember($cacheKey, self::CACHE_TTL, function () use ($globalRoles) {
+            $role = $this->roles()->select('name')->first();
+            $roleName = $role ? $role->name : null;
+            
+            return [
+                'role' => $roleName,
+                'permissions' => $roleName ? ($globalRoles[$roleName]['permissions'] ?? []) : [],
+                'cached_at' => now()->timestamp,
+                'version' => Cache::get(self::PERMISSIONS_VERSION_KEY)
+            ];
+        });
+    }
+```
+### Agregar al kernel
+    app\Http\Kernel.php
+```php 
+  protected $routeMiddleware = [
+        // Otros middlewares...
+        'role' => \App\Http\Middleware\RoleMiddleware::class,
+    ];
+```
 ## Ejemplos de Uso
+
+### ejemplo controlador de roles y permisos 
+    app\Http\Controllers\RolePermissionController.php
 
 ### Rutas (web.php)
 
@@ -138,6 +321,15 @@ class UserController extends Controller
 @cannot('task_edit')
     <p>No tienes permisos para editar tareas</p>
 @endcannot
+
+tambien  este genera mas consulta pero  puede tener  mas de un permiso requerido
+    @permission('role_create')
+        <button>Crear Nuevo Rol</button>
+    @endpermission
+
+    @permission('task_edit')
+        <form>Editar Tarea</form>
+    @endpermission
 ```
 
 #### Condicionales de Roles
@@ -300,6 +492,17 @@ class AuthServiceProvider extends ServiceProvider
         });
 
         Blade::directive('endrole', function () {
+            return "<?php endif; ?>";
+        });
+
+        Blade::directive('permission', function ($permissions) {
+            return "<?php 
+                \$permissionsArray = is_array({$permissions}) ? {$permissions} : explode(',', {$permissions});
+                if(auth()->check() && auth()->user()->hasAnyPermission(\$permissionsArray)): 
+            ?>";
+        });
+
+         Blade::directive('endpermission', function () {
             return "<?php endif; ?>";
         });
     }

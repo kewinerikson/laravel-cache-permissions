@@ -18,9 +18,9 @@
                     @can('role_create')
                         <p>Tienes permiso para crear roles.</p>
                     @endcan
-                    @can('task_edit')
-                        <p>Tienes permiso para editar tareas.</p>
-                    @endcan
+                    @permission('task_edit,user_view')
+                        <p>Tienes permiso para editar tareas y/o ver usuarios.</p>
+                    @endpermission
                     {{-- @dd(auth()->user()->roles) --}}
                     
                     {{-- @cannot('tasks_edit')
@@ -34,11 +34,11 @@
                     @role('user')
                         <p>Este contenido es solo para usuarios.</p>
                     @endrole
-                    {{-- @dd(auth()->user()->debugRoleAndPermissions()); --}}
                     @role(['admin', 'user'])
                         <p>Contenido para administradores o usuarios</p>
                     @endrole
                     {{-- @dd(auth()->user()->debugRoleAndPermissions()); --}}
+
                     @role('admin')
                     <form action="{{ route('roles.updateRole', auth()->user()) }}" method="POST">
                         @csrf

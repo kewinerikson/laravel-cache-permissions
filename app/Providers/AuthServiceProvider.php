@@ -18,32 +18,42 @@ class AuthServiceProvider extends ServiceProvider
     ];
 
     /**
-     * Registra cualquier servicio de autenticación y autorización.
+     * Registra servicios de autenticación y autorización.
+     * Configura directivas Blade personalizadas para roles y permisos.
      */
     public function boot(): void
     {
-        // Registra las políticas definidas en $policies
         $this->registerPolicies();
 
-        // Define una verificación de permisos usando Gate y antes de cualquier otra comprobación
+        /**
+         * Gate global para verificación de permisos.
+         * Se ejecuta antes de cualquier otra comprobación de autorización.
+         * 
+         * @param User|null $user Usuario actual
+         * @param string $ability Permiso a verificar
+         * @return bool|null
+         */
         Gate::before(function ($user, $ability) {
-            // Si no hay un usuario autenticado, devuelve null
             if (!$user) return null;
-            
-            // Verifica si el usuario tiene el permiso solicitado
             return $user->hasPermission($ability) ?: null;
         });
 
         /**
-         * Directivas Blade para verificación de roles
+         * Directiva para verificar un rol específico.
+         * Uso: @role('admin')
+         * 
+         * @param string|array $role Rol o roles a verificar
          */
-        
-        // Directiva @role para verificar si el usuario tiene un rol específico
         Blade::directive('role', function ($role) {
             return "<?php if(auth()->check() && auth()->user()->hasRole({$role})): ?>";
         });
 
-        // Directiva @endrole para cerrar la condición de @role
+        /**
+         * Directiva para verificar múltiples roles.
+         * Uso: @role(['admin', 'editor'])
+         * 
+         * @param string|array $roles Array de roles o string separada por comas
+         */
         Blade::directive('role', function ($roles) {
             return "<?php 
                 \$rolesArray = is_array({$roles}) ? {$roles} : explode(',', {$roles});
@@ -51,10 +61,31 @@ class AuthServiceProvider extends ServiceProvider
             ?>";
         });
         
+        /**
+         * Cierra el bloque @role
+         */
         Blade::directive('endrole', function () {
             return "<?php endif; ?>";
         });
-        
-        
+
+        /**
+         * Directiva para verificar permisos.
+         * Uso: @permission(['edit-posts', 'create-posts'])
+         * 
+         * @param string|array $permissions Array de permisos o string separada por comas
+         */
+        Blade::directive('permission', function ($permissions) {
+            return "<?php 
+                \$permissionsArray = is_array({$permissions}) ? {$permissions} : explode(',', {$permissions});
+                if(auth()->check() && auth()->user()->hasAnyPermission(\$permissionsArray)): 
+            ?>";
+        });
+
+        /**
+         * Cierra el bloque @permission
+         */
+        Blade::directive('endpermission', function () {
+            return "<?php endif; ?>";
+        });
     }
 }

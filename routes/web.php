@@ -32,7 +32,7 @@ Route::post('/roles/{user}/role', [RolePermissionController::class, 'updateRole'
 
 Route::post('/clear-permissions-cache', [RolePermissionController::class, 'clearPermissionsCache'])
     ->name('cache.clear.permissions')
-   ; // Solo accesible para administradores
+    ; // Solo accesible para administradores
 
 
 Route::view('profile', 'profile')

@@ -190,6 +190,18 @@ class User extends Authenticatable
         return in_array($permissionName, $userData['permissions']);
     }
 
+    /**
+     * Verifica si el usuario tiene al menos uno de los permisos especificados.
+     */
+    public function hasAnyPermission($permissions)
+    {
+        $userData = $this->getUserPermissionsAndRole();
+        
+        $permissionsArray = is_string($permissions) ? explode(',', $permissions) : $permissions;
+        
+        return !empty(array_intersect($userData['permissions'], $permissionsArray));
+    }
+
     // ==============================
     // GESTIÓN DE CACHÉ MEJORADA
     // ==============================
